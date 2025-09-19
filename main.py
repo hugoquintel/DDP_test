@@ -95,13 +95,46 @@ def run(rank, world_size):
             optimizer.step()
             loss_total += loss
 
-        loss_total_all = [torch.zeros_like(loss_total) for i in range(world_size)]
+        loss_total_all = [torch.zeros_like(loss_total)] * world_size
         dist.all_gather(loss_total_all, loss_total)
 
-        print(len(train_dataloader))
-
         if rank == 0:
-            print(f'Total loss: {sum(loss_total_all):.5f} | Average loss: {sum(loss_total_all)/len(train_dataloader):.5f}')
+            print(f'Total loss: {sum(loss_total_all):.5f}')
+
+
+
+
+
+        plm.eval()
+        cls.eval()
+        labels_dev_true, labels_dev_pred = [], []
+        with torch.inference_mode():
+            for batch_index, data in enumerate(dev_dataloader):
+                responses_input_ids = data['responses_input_ids'].to(rank)
+                responses_attention_mask = data['responses_attention_mask'].to(rank)
+                labels = data['labels'].to(rank)
+
+                plm_logit = plm(input_ids=responses_input_ids, attention_mask=responses_attention_mask).last_hidden_state[:, 0, :]
+                logit = cls(plm_logit)
+                labels_dev_true.extend(labels.tolist())
+                labels_dev_pred.extend(logit.argmax(dim=-1).tolist())
+
+        labels_dev_true_all = [None] * world_size
+        labels_dev_pred_all = [None] * world_size
+        dist.all_gather_object(labels_dev_true_all, labels_dev_true)
+        dist.all_gather_object(labels_dev_pred_all, labels_dev_pred)
+
+        print(len(labels_dev_true_all))
+
+        # if rank == 0:
+        #     labels_dev_true_combined = []
+        #     labels_dev_pred_combined = []
+        #     for true, pred in zip(labels_dev_true_all, labels_dev_pred_all):
+        #         labels_dev_true_combined.extend(true)
+        #         labels_dev_pred_combined.extend(pred)
+
+
+        # Add average loss
 
 
         
