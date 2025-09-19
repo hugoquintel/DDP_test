@@ -58,8 +58,8 @@ def run(rank, world_size):
     dev_dataloader = DataLoader(dev_data, batch_size=args.DEV_BATCH, pin_memory=True,
                                 num_workers=no_workers, sampler=dev_sampler)
 
-    plm = AutoModel.from_pretrained(args.PLM).to('cuda')
-    cls = ClassificationLayers(plm.config, labels_to_ids).to('cuda')
+    plm = AutoModel.from_pretrained(args.PLM).to(rank)
+    cls = ClassificationLayers(plm.config, labels_to_ids).to(rank)
 
     plm = nn.parallel.DistributedDataParallel(plm, device_ids=[rank])
     cls = nn.parallel.DistributedDataParallel(cls, device_ids=[rank])
@@ -74,19 +74,35 @@ def run(rank, world_size):
     optimizer = optimizer_map[args.OPTIMIZER](train_params)
     loss_function = nn.CrossEntropyLoss()
 
-    plm.train()
-    cls.train()
-    loss_total = 0
+    
+    
     for epoch in range(args.EPOCHS):
         train_sampler.set_epoch(epoch)
+        plm.train()
+        cls.train()
+        loss_total = 0
         for batch_index, data in enumerate(train_dataloader):
-            responses_input_ids = data['responses_input_ids'].to('cuda')
-            responses_attention_mask = data['responses_attention_mask'].to('cuda')
-            labels = data['labels'].to('cuda')
+            responses_input_ids = data['responses_input_ids'].to(rank)
+            responses_attention_mask = data['responses_attention_mask'].to(rank)
+            labels = data['labels'].to(rank)
             
             plm_logit = plm(input_ids=responses_input_ids, attention_mask=responses_attention_mask).last_hidden_state[:, 0, :]
             logit = cls(plm_logit)
             loss = loss_function(logit, labels)
+
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            loss_total += loss
+        
+        print(loss_total, '\n')
+        
+
+
+            
+
+        
+        
     
 
     print('finish')
