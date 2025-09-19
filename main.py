@@ -94,9 +94,14 @@ def run(rank, world_size):
             loss.backward()
             optimizer.step()
             loss_total += loss
+
         loss_total_all = [torch.zeros_like(loss_total) for i in range(world_size)]
         dist.all_gather(loss_total_all, loss_total)
-        print(loss_total_all, loss_total)
+
+        print(len(train_dataloader))
+
+        if rank == 0:
+            print(f'Total loss: {sum(loss_total_all):.5f} | Average loss: {sum(loss_total_all)/len(train_dataloader):.5f}')
 
 
         
