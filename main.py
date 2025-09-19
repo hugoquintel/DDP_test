@@ -124,7 +124,7 @@ def run(rank, world_size):
         dist.all_gather_object(labels_dev_true_all, labels_dev_true)
         dist.all_gather_object(labels_dev_pred_all, labels_dev_pred)
 
-        print(len(labels_dev_true_all))
+        print(labels_dev_true_all)
 
         # if rank == 0:
         #     labels_dev_true_combined = []
