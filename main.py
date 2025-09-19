@@ -80,9 +80,9 @@ def run(rank, world_size):
     for epoch in range(args.EPOCHS):
         train_sampler.set_epoch(epoch)
         for batch_index, data in enumerate(train_dataloader):
-            responses_input_ids = data['responses_input_ids'].to('cuda')
-            responses_attention_mask = data['responses_attention_mask'].to('cuda')
-            labels = data['labels'].to('cuda')
+            responses_input_ids = data['responses_input_ids'].to(0)
+            responses_attention_mask = data['responses_attention_mask'].to(0)
+            labels = data['labels'].to(0)
             
             plm_logit = plm(input_ids=responses_input_ids, attention_mask=responses_attention_mask).last_hidden_state[:, 0, :]
             logit = cls(plm_logit)
