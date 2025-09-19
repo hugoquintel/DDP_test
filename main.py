@@ -101,7 +101,7 @@ def main():
     # Get number of GPUs
     world_size = torch.cuda.device_count()
     # Spawn processes
-    mp.spawn(run, args=(world_size), nprocs=world_size, join=True)
+    mp.spawn(run, args=(world_size,), nprocs=world_size, join=True)
 
 if __name__ == '__main__':
     main()
