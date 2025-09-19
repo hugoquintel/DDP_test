@@ -50,12 +50,13 @@ def run(rank, world_size):
     dev_data = LLMHallucinationDataset(dev_df)
 
     no_workers = os.cpu_count()
-    train_sampler = DistributedSampler(train_data, num_replicas=world_size, rank=rank)
 
-    train_dataloader = DataLoader(train_data, batch_size=args.TRAIN_BATCH, shuffle=False,
-                                  pin_memory=True, num_workers=no_workers, sampler=train_sampler)
-    dev_dataloader = DataLoader(dev_data, batch_size=args.DEV_BATCH, shuffle=False,
-                                pin_memory=True, num_workers=no_workers)
+    train_sampler = DistributedSampler(train_data, num_replicas=world_size, rank=rank, shuffle=False)
+    train_dataloader = DataLoader(train_data, batch_size=args.TRAIN_BATCH, pin_memory=True,
+                                  num_workers=no_workers, sampler=train_sampler)
+    dev_sampler = DistributedSampler(dev_data, num_replicas=world_size, rank=rank, shuffle=False)
+    dev_dataloader = DataLoader(dev_data, batch_size=args.DEV_BATCH, pin_memory=True,
+                                num_workers=no_workers, sampler=dev_sampler)
 
     plm = AutoModel.from_pretrained(args.PLM).to(rank)
     cls = ClassificationLayers(plm.config, labels_to_ids).to(rank)
