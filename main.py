@@ -1,11 +1,14 @@
 import os
 import torch
 import random
+import pathlib
 import numpy as np
 import torch.distributed as dist
 import torch.multiprocessing as mp
 from transformers import AutoTokenizer, AutoModel
 from torch.utils.data.distributed import DistributedSampler
+
+from data_setup import preprocess_data, get_labels, LLMHallucinationDataset
 
 def setup_distributed(rank, world_size):
     """Initialize the distributed environment."""
@@ -27,9 +30,19 @@ def run(rank, world_size):
     torch.manual_seed(1)
     torch.cuda.manual_seed_all(1)
 
-    # Create directories (only rank 0 to avoid race conditions)
-    # tokenizer = AutoTokenizer.from_pretrained(args.PLM)
-    print('Hello')
+    data_path = pathlib.Path('data/test_data')
+    tokenizer = AutoTokenizer.from_pretrained('vinai/phobert-base')
+    train_df = preprocess_data(data_path, 'train', tokenizer)
+    dev_df = preprocess_data(data_path, 'dev', tokenizer)
+
+    labels_to_ids, ids_to_labels = get_labels(train_df)
+    train_df['labels'] = train_df['labels'].map(labels_to_ids).fillna(0).astype(int)
+    dev_df['labels'] = dev_df['labels'].map(labels_to_ids).fillna(0).astype(int)
+
+    train_data = LLMHallucinationDataset(train_df)
+    dev_data = LLMHallucinationDataset(dev_df)
+
+    print(rank)
 
     # Synchronize processes after directory creation
     cleanup_distributed()
