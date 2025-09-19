@@ -5,6 +5,7 @@ import pathlib
 import numpy as np
 from torch import nn
 from torch import optim
+from sklearn import metrics
 import torch.distributed as dist
 import torch.multiprocessing as mp
 from torch.utils.data import DataLoader
@@ -124,17 +125,15 @@ def run(rank, world_size):
         dist.all_gather_object(labels_dev_true_all, labels_dev_true)
         dist.all_gather_object(labels_dev_pred_all, labels_dev_pred)
         dist.barrier()
-        print(labels_dev_true_all)
+        
+        if rank == 0:
+            labels_dev_true_all = [label for label_list in labels_dev_true_all for label in label_list]
+            labels_dev_pred_all = [label for label_list in labels_dev_pred_all for label in label_list]
+            cls_report = metrics.classification_report(labels_dev_true_all, labels_dev_pred_all, target_names=labels_to_ids,
+                                                       labels=tuple(labels_to_ids.values()), zero_division=0.0, digits=5)
+            print(cls_report, '\n')
 
-        # if rank == 0:
-        #     labels_dev_true_combined = []
-        #     labels_dev_pred_combined = []
-        #     for true, pred in zip(labels_dev_true_all, labels_dev_pred_all):
-        #         labels_dev_true_combined.extend(true)
-        #         labels_dev_pred_combined.extend(pred)
-
-
-        # Add average loss
+        dist.barrier()
 
 
         
@@ -144,10 +143,6 @@ def run(rank, world_size):
             
 
         
-        
-    
-
-    print('finish')
 
 
 
