@@ -81,7 +81,6 @@ def run(rank, world_size):
         plm.train()
         cls.train()
         loss_total = 0
-        loss_total_all = [torch.tensor(0, dtype=torch.int64, device=i) for i in range(world_size)]
         for batch_index, data in enumerate(train_dataloader):
             responses_input_ids = data['responses_input_ids'].to(rank)
             responses_attention_mask = data['responses_attention_mask'].to(rank)
@@ -95,6 +94,7 @@ def run(rank, world_size):
             loss.backward()
             optimizer.step()
             loss_total += loss
+        loss_total_all = [torch.zeros_like(loss_total) for i in range(world_size)]
         dist.all_gather(loss_total_all, loss_total)
         print(loss_total_all, loss_total)
 
