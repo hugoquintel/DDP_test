@@ -98,9 +98,6 @@ def run(rank, world_size):
         dist.all_gather(loss_total_all, loss_total)
         print(loss_total_all, loss_total)
 
-        if rank == 0:
-            print()
-            dist.barrier()
 
         
         
