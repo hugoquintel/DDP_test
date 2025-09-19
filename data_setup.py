@@ -1,6 +1,5 @@
 import torch
 import pandas as pd
-from pyvi import ViTokenizer
 from torch.utils.data import Dataset
 
 def preprocess_data(path, dataset, tokenizer):
@@ -26,9 +25,7 @@ class LLMHallucinationDataset(Dataset):
     def __len__(self):
         return len(self.df)
     def __getitem__(self, index):
-        data = {'prompts_contexts_input_ids': torch.tensor(self.df['prompts_contexts_input_ids'].iloc[index]),
-                'prompts_contexts_attention_mask': torch.tensor(self.df['prompts_contexts_attention_mask'].iloc[index]),
-                'responses_input_ids': torch.tensor(self.df['responses_input_ids'].iloc[index]),
+        data = {'responses_input_ids': torch.tensor(self.df['responses_input_ids'].iloc[index]),
                 'responses_attention_mask': torch.tensor(self.df['responses_attention_mask'].iloc[index]),
                 'labels': self.df['labels'].iloc[index]}
         return data

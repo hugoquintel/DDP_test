@@ -3,12 +3,16 @@ import torch
 import random
 import pathlib
 import numpy as np
+from torch import nn
+from torch import optim
 import torch.distributed as dist
 import torch.multiprocessing as mp
+from torch.utils.data import DataLoader
 from transformers import AutoTokenizer, AutoModel
 from torch.utils.data.distributed import DistributedSampler
 
 from args import get_arguments
+from model import ClassificationLayers
 from data_setup import preprocess_data, get_labels, LLMHallucinationDataset
 
 def setup_distributed(rank, world_size):
@@ -28,10 +32,10 @@ def run(rank, world_size):
 
     args = get_arguments()
 
-    random.seed(1)
-    np.random.seed(1)
-    torch.manual_seed(1)
-    torch.cuda.manual_seed_all(1)
+    random.seed(args.RANDOM_SEED)
+    np.random.seed(args.RANDOM_SEED)
+    torch.manual_seed(args.RANDOM_SEED)
+    torch.cuda.manual_seed_all(args.RANDOM_SEED)
 
     data_path = pathlib.Path(args.DATA_PATH)
     tokenizer = AutoTokenizer.from_pretrained('vinai/phobert-base')
@@ -45,7 +49,49 @@ def run(rank, world_size):
     train_data = LLMHallucinationDataset(train_df)
     dev_data = LLMHallucinationDataset(dev_df)
 
-    print(rank)
+    no_workers = os.cpu_count()
+    train_sampler = DistributedSampler(train_data, num_replicas=world_size, rank=rank)
+
+    train_dataloader = DataLoader(train_data, batch_size=args.TRAIN_BATCH, shuffle=False,
+                                  pin_memory=True, num_workers=no_workers, sampler=train_sampler)
+    dev_dataloader = DataLoader(dev_data, batch_size=args.DEV_BATCH, shuffle=False,
+                                pin_memory=True, num_workers=no_workers)
+
+    plm = AutoModel.from_pretrained(args.PLM).to(rank)
+    cls = ClassificationLayers(plm.config, labels_to_ids).to(rank)
+
+    plm = nn.parallel.DistributedDataParallel(plm, device_ids=[rank])
+    cls = nn.parallel.DistributedDataParallel(cls, device_ids=[rank])
+
+    train_params = ({'params': plm.parameters(), 'lr': args.PLM_LR},
+                    {'params': cls.parameters(), 'lr': args.CLS_LR})
+
+    optimizer_map = {'ASGD': optim.ASGD, 'Adadelta': optim.Adadelta, 'Adagrad': optim.Adagrad, 'Adam': optim.Adam,
+                     'AdamW': optim.AdamW, 'Adamax': optim.Adamax, 'LBFGS': optim.LBFGS, 'NAdam': optim.NAdam, 'RAdam': optim.RAdam,
+                     'RMSprop': optim.RMSprop, 'Rprop': optim.Rprop,'SGD': optim.SGD, 'SparseAdam': optim.SparseAdam}
+    
+    optimizer = optimizer_map[args.OPTIMIZER](train_params)
+    loss_function = nn.CrossEntropyLoss()
+
+    plm.train()
+    cls.train()
+    loss_total = 0
+    for epoch in range(args.EPOCHS):
+        train_sampler.set_epoch(epoch)
+        for batch_index, data in enumerate(train_dataloader):
+            responses_input_ids = data['responses_input_ids'].to(rank)
+            responses_attention_mask = data['responses_attention_mask'].to(rank)
+            labels = data['labels'].to(rank)
+            
+            plm_logit = plm(input_ids=responses_input_ids, attention_mask=responses_attention_mask).last_hidden_state[:, 0, :]
+            logit = cls(plm_logit)
+            loss = loss_function(logit, labels)
+    
+
+    print('finish')
+
+
+
 
     # Synchronize processes after directory creation
     cleanup_distributed()
