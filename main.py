@@ -8,6 +8,7 @@ import torch.multiprocessing as mp
 from transformers import AutoTokenizer, AutoModel
 from torch.utils.data.distributed import DistributedSampler
 
+from args import get_arguments
 from data_setup import preprocess_data, get_labels, LLMHallucinationDataset
 
 def setup_distributed(rank, world_size):
@@ -25,12 +26,14 @@ def run(rank, world_size):
     """Main function for distributed training."""
     setup_distributed(rank, world_size)
 
+    args = get_arguments()
+
     random.seed(1)
     np.random.seed(1)
     torch.manual_seed(1)
     torch.cuda.manual_seed_all(1)
 
-    data_path = pathlib.Path('data/test_data')
+    data_path = pathlib.Path(args.DATA_PATH)
     tokenizer = AutoTokenizer.from_pretrained('vinai/phobert-base')
     train_df = preprocess_data(data_path, 'train', tokenizer)
     dev_df = preprocess_data(data_path, 'dev', tokenizer)
