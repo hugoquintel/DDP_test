@@ -80,9 +80,9 @@ def run(rank, world_size):
     for epoch in range(args.EPOCHS):
         train_sampler.set_epoch(epoch)
         for batch_index, data in enumerate(train_dataloader):
-            responses_input_ids = data['responses_input_ids'].to(rank)
-            responses_attention_mask = data['responses_attention_mask'].to(rank)
-            labels = data['labels'].to(rank)
+            responses_input_ids = data['responses_input_ids'].to('cuda')
+            responses_attention_mask = data['responses_attention_mask'].to('cuda')
+            labels = data['labels'].to('cuda')
             
             plm_logit = plm(input_ids=responses_input_ids, attention_mask=responses_attention_mask).last_hidden_state[:, 0, :]
             logit = cls(plm_logit)
@@ -101,7 +101,7 @@ def main():
     # Get number of GPUs
     world_size = torch.cuda.device_count()
     # Spawn processes
-    mp.spawn(run, args=(world_size,), nprocs=world_size, join=True)
+    mp.spawn(run, args=(world_size), nprocs=world_size, join=True)
 
 if __name__ == '__main__':
     main()
