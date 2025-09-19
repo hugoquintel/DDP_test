@@ -13,7 +13,7 @@ from transformers import AutoTokenizer, AutoModel
 from torch.utils.data.distributed import DistributedSampler
 
 from args import get_arguments
-from model import ClassificationLayers
+from model import TransformerClassifier
 from data_setup import preprocess_data, get_labels, LLMHallucinationDataset
 
 def setup_distributed(rank, world_size):
@@ -39,9 +39,9 @@ def run(rank, world_size):
     torch.cuda.manual_seed_all(args.RANDOM_SEED)
 
     data_path = pathlib.Path(args.DATA_PATH)
-    tokenizer = AutoTokenizer.from_pretrained('vinai/phobert-base')
-    train_df = preprocess_data(data_path, 'train', tokenizer)
-    dev_df = preprocess_data(data_path, 'dev', tokenizer)
+    tokenizer = AutoTokenizer.from_pretrained(args.PLM)
+    train_df = preprocess_data(args, data_path, 'train', tokenizer)
+    dev_df = preprocess_data(args, data_path, 'dev', tokenizer)
 
     labels_to_ids, ids_to_labels = get_labels(train_df)
     train_df['labels'] = train_df['labels'].map(labels_to_ids).fillna(0).astype(int)
@@ -52,20 +52,23 @@ def run(rank, world_size):
 
     no_workers = os.cpu_count()
 
-    train_sampler = DistributedSampler(train_data, num_replicas=world_size, rank=rank, shuffle=False)
+    train_sampler = DistributedSampler(train_data, num_replicas=world_size, rank=rank, shuffle=True)
     train_dataloader = DataLoader(train_data, batch_size=args.TRAIN_BATCH, pin_memory=True,
                                   num_workers=no_workers, sampler=train_sampler)
     dev_sampler = DistributedSampler(dev_data, num_replicas=world_size, rank=rank, shuffle=False)
     dev_dataloader = DataLoader(dev_data, batch_size=args.DEV_BATCH, pin_memory=True,
                                 num_workers=no_workers, sampler=dev_sampler)
+    
+    prompts_contexts_plm = AutoModel.from_pretrained(args.PLM).to(rank)
+    responses_plm = AutoModel.from_pretrained(args.PLM).to(rank)
+    cls = TransformerClassifier(prompts_contexts_plm.config, labels_to_ids).to(rank)
 
-    plm = AutoModel.from_pretrained(args.PLM).to(rank)
-    cls = ClassificationLayers(plm.config, labels_to_ids).to(rank)
-
-    plm = nn.parallel.DistributedDataParallel(plm, device_ids=[rank])
+    prompts_contexts_plm = nn.parallel.DistributedDataParallel(prompts_contexts_plm, device_ids=[rank])
+    responses_plm = nn.parallel.DistributedDataParallel(responses_plm, device_ids=[rank])
     cls = nn.parallel.DistributedDataParallel(cls, device_ids=[rank])
 
-    train_params = ({'params': plm.parameters(), 'lr': args.PLM_LR},
+    train_params = ({'params': prompts_contexts_plm.parameters(), 'lr': args.PLM_LR},
+                    {'params': responses_plm.parameters(), 'lr': args.PLM_LR},
                     {'params': cls.parameters(), 'lr': args.CLS_LR})
 
     optimizer_map = {'ASGD': optim.ASGD, 'Adadelta': optim.Adadelta, 'Adagrad': optim.Adagrad, 'Adam': optim.Adam,
@@ -74,23 +77,27 @@ def run(rank, world_size):
     
     optimizer = optimizer_map[args.OPTIMIZER](train_params)
     loss_function = nn.CrossEntropyLoss()
-
-    
     
     for epoch in range(args.EPOCHS):
+        
+        if rank == 0:
+            print(f'Epoch {epoch}')
+
         train_sampler.set_epoch(epoch)
-        plm.train()
+        prompts_contexts_plm.train()
+        responses_plm.train()
         cls.train()
         loss_total = 0
         for batch_index, data in enumerate(train_dataloader):
+            prompts_contexts_input_ids = data['prompts_contexts_input_ids'].to(rank)
+            prompts_contexts_attention_mask = data['prompts_contexts_attention_mask'].to(rank)
             responses_input_ids = data['responses_input_ids'].to(rank)
             responses_attention_mask = data['responses_attention_mask'].to(rank)
             labels = data['labels'].to(rank)
-            
-            plm_logit = plm(input_ids=responses_input_ids, attention_mask=responses_attention_mask).last_hidden_state[:, 0, :]
-            logit = cls(plm_logit)
+            prompts_contexts_logit = prompts_contexts_plm(input_ids=prompts_contexts_input_ids, attention_mask=prompts_contexts_attention_mask).last_hidden_state
+            responses_logit = responses_plm(input_ids=responses_input_ids, attention_mask=responses_attention_mask).last_hidden_state
+            logit = cls(prompts_contexts_logit, responses_logit)[:, 0, :]
             loss = loss_function(logit, labels)
-
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
@@ -106,17 +113,20 @@ def run(rank, world_size):
 
 
 
-        plm.eval()
+        prompts_contexts_plm.eval()
+        responses_plm.eval()
         cls.eval()
         labels_dev_true, labels_dev_pred = [], []
         with torch.inference_mode():
             for batch_index, data in enumerate(dev_dataloader):
+                prompts_contexts_input_ids = data['prompts_contexts_input_ids'].to(rank)
+                prompts_contexts_attention_mask = data['prompts_contexts_attention_mask'].to(rank)
                 responses_input_ids = data['responses_input_ids'].to(rank)
                 responses_attention_mask = data['responses_attention_mask'].to(rank)
                 labels = data['labels'].to(rank)
-
-                plm_logit = plm(input_ids=responses_input_ids, attention_mask=responses_attention_mask).last_hidden_state[:, 0, :]
-                logit = cls(plm_logit)
+                prompts_contexts_logit = prompts_contexts_plm(input_ids=prompts_contexts_input_ids, attention_mask=prompts_contexts_attention_mask).last_hidden_state
+                responses_logit = responses_plm(input_ids=responses_input_ids, attention_mask=responses_attention_mask).last_hidden_state
+                logit = cls(prompts_contexts_logit, responses_logit)[:, 0, :]
                 labels_dev_true.extend(labels.tolist())
                 labels_dev_pred.extend(logit.argmax(dim=-1).tolist())
 
