@@ -63,9 +63,9 @@ def run(rank, world_size):
     responses_plm = AutoModel.from_pretrained(args.PLM).to(rank)
     cls = TransformerClassifier(prompts_contexts_plm.config, labels_to_ids).to(rank)
 
-    prompts_contexts_plm = nn.parallel.DistributedDataParallel(prompts_contexts_plm, device_ids=[rank], grad_as_bucket_view=True)
-    responses_plm = nn.parallel.DistributedDataParallel(responses_plm, device_ids=[rank], grad_as_bucket_view=True)
-    cls = nn.parallel.DistributedDataParallel(cls, device_ids=[rank], grad_as_bucket_view=True)
+    prompts_contexts_plm = nn.parallel.DistributedDataParallel(prompts_contexts_plm, device_ids=[rank], gradients_as_bucket_view=True)
+    responses_plm = nn.parallel.DistributedDataParallel(responses_plm, device_ids=[rank], gradients_as_bucket_view=True)
+    cls = nn.parallel.DistributedDataParallel(cls, device_ids=[rank], gradients_as_bucket_view=True)
 
     train_params = ({'params': prompts_contexts_plm.parameters(), 'lr': args.PLM_LR},
                     {'params': responses_plm.parameters(), 'lr': args.PLM_LR},
