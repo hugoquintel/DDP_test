@@ -63,9 +63,9 @@ def run(rank, world_size):
     responses_plm = AutoModel.from_pretrained(args.PLM).to(rank)
     cls = TransformerClassifier(prompts_contexts_plm.config, labels_to_ids).to(rank)
 
-    prompts_contexts_plm = nn.parallel.DistributedDataParallel(prompts_contexts_plm, device_ids=[rank])
-    responses_plm = nn.parallel.DistributedDataParallel(responses_plm, device_ids=[rank])
-    cls = nn.parallel.DistributedDataParallel(cls, device_ids=[rank])
+    prompts_contexts_plm = nn.parallel.DistributedDataParallel(prompts_contexts_plm, device_ids=[rank], grad_as_bucket_view=True)
+    responses_plm = nn.parallel.DistributedDataParallel(responses_plm, device_ids=[rank], grad_as_bucket_view=True)
+    cls = nn.parallel.DistributedDataParallel(cls, device_ids=[rank], grad_as_bucket_view=True)
 
     train_params = ({'params': prompts_contexts_plm.parameters(), 'lr': args.PLM_LR},
                     {'params': responses_plm.parameters(), 'lr': args.PLM_LR},
@@ -77,12 +77,30 @@ def run(rank, world_size):
     
     optimizer = optimizer_map[args.OPTIMIZER](train_params)
     loss_function = nn.CrossEntropyLoss()
+
+
+
+
+
+    train_dataloader_all = [None] * world_size
+    dev_dataloader_all = [None] * world_size
+    dist.all_gather_object(train_dataloader_all, train_dataloader)
+    dist.all_gather_object(dev_dataloader_all, dev_dataloader)
+    if rank == 0:
+        train_dataloader_all = [data for data_list in train_dataloader_all for data in data_list]
+        dev_dataloader_all = [data for data_list in dev_dataloader_all for data in data_list]
+        print(f'Number of samples in train set: {len(train_data)}')
+        print(f'Number of samples in dev set: {len(dev_data)}')
+        print(f'Number of train batches: {len(train_dataloader_all)}')
+        print(f'Number of dev batches: {len(dev_dataloader_all)}')
+        print(f'Labels to ids: {labels_to_ids}')
+        print(f'Ids to labels: {ids_to_labels}\n')
+    dist.barrier()
+
     
     for epoch in range(args.EPOCHS):
-        
         if rank == 0:
             print(f'Epoch {epoch}')
-
         train_sampler.set_epoch(epoch)
         prompts_contexts_plm.train()
         responses_plm.train()
@@ -102,15 +120,10 @@ def run(rank, world_size):
             loss.backward()
             optimizer.step()
             loss_total += loss
-
         loss_total_all = [torch.zeros_like(loss_total)] * world_size
         dist.all_gather(loss_total_all, loss_total)
-
         if rank == 0:
             print(f'Total loss: {sum(loss_total_all):.5f}')
-
-
-
 
 
         prompts_contexts_plm.eval()
